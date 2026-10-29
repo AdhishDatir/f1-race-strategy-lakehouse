@@ -17,27 +17,27 @@
 
 ## 📖 About
 
-A data lakehouse on **Databricks** for analysing Formula 1 race strategy, built with **PySpark** and **Delta Lake** using the **medallion architecture** (🥉 Bronze → 🥈 Silver → 🥇 Gold). It ingests race results and lap-by-lap timing data from the **[Jolpica F1 API](https://github.com/jolpica/jolpica-f1)**, then cleans and models them for strategy analysis such as pace, stints and pit stop impact. ⏱️🛞
+A data lakehouse on **Databricks** for analysing Formula 1 race strategy, built with **PySpark** and **Delta Lake** using the **medallion architecture** (🥉 Bronze → 🥈 Silver → 🥇 Gold). It ingests race results, lap-by-lap timing, and pit-stop data from the **[Jolpica F1 API](https://github.com/jolpica/jolpica-f1)**, enriches stints with tyre compounds from **[OpenF1](https://openf1.org/docs/)**, and models them for pace, stint, degradation, and pit-stop analysis. ⏱️🛞
 
 ## 🏗️ Architecture
 
 ```
-  🌐 Jolpica F1 API
-        │
-        ▼
-┌──────────┐     ┌──────────┐     ┌──────────┐
-│ 🥉 BRONZE │ ──▶ │ 🥈 SILVER │ ──▶ │ 🥇 GOLD   │
-│ raw JSON │     │ cleaned  │     │ strategy │
-│ → Delta  │     │ typed    │     │ metrics  │
-└──────────┘     └──────────┘     └──────────┘
-                                   (planned 🚧)
+  🌐 Jolpica F1 API ───────┐
+  🌐 OpenF1 API ───────────┤
+                           ▼
+                    ┌──────────┐     ┌──────────┐     ┌──────────┐
+                    │ 🥉 BRONZE │ ──▶ │ 🥈 SILVER │ ──▶ │ 🥇 GOLD   │
+                    │ raw JSON │     │ cleaned  │     │ strategy │
+                    │ → Delta  │     │ typed    │     │ metrics  │
+                    └──────────┘     └──────────┘     └──────────┘
+                                                        (in progress 🚧)
 ```
 
 | Layer | Purpose | Tables |
 |-------|---------|--------|
-| 🥉 **Bronze** | Raw API responses landed as Delta tables, minimal transformation | 🏆 race results, ⏱️ lap data |
-| 🥈 **Silver** | Cleaned, typed, deduplicated and validated data | 🏆 race results, ⏱️ lap times |
-| 🥇 **Gold** | Aggregated, analysis-ready strategy metrics | 🚧 *planned* |
+| 🥉 **Bronze** | Raw API responses landed as Delta tables with source metadata | 🏆 race results, ⏱️ lap data, 🛞 pit stops, 🏁 OpenF1 stints |
+| 🥈 **Silver** | Cleaned, typed, deduplicated, validated data | 🏆 race results, ⏱️ lap times, 🛞 pit stops |
+| 🥇 **Gold** | Aggregated, analysis-ready strategy metrics | 🧩 driver stint metrics, pace and degradation (in progress) |
 
 ## 📂 Repository Structure
 
@@ -49,8 +49,12 @@ Notebooks are numbered and meant to be run **in order**. ▶️
 | 🏠 | `01_lakehouse_setup.ipynb` | Creates the lakehouse environment: schemas and storage layout |
 | 🥉 | `02_bronze_api_ingestion.ipynb` | Ingests race results from the Jolpica API into Bronze |
 | 🥈 | `03_silver_race_results.ipynb` | Cleans and transforms race results into Silver |
-| 🥉 | `04_bronze_lap_ingestion.ipynb` | Ingests lap-level timing data into Bronze |
+| 🥉 | `04_bronze_lap_ingestion.ipynb` | Ingests paginated lap-level timing data into Bronze |
 | 🥈 | `05_silver_lap_times.ipynb` | Cleans and transforms lap times into Silver |
+| 🥉 | `06_bronze_pit_stop_ingestion.ipynb` | Ingests raw pit-stop data into Bronze |
+| 🥈 | `07_silver_pit_stops.ipynb` | Cleans and standardizes pit stops into Silver |
+| 🥇 | `08_gold_stints.ipynb` | Uses window functions to infer stint boundaries and metrics |
+| 🛞 | `09_openf1_tyre_stints.ipynb` | Matches OpenF1 sessions and enriches stints with compounds |
 
 ## 🛠️ Tech Stack
 
@@ -59,17 +63,18 @@ Notebooks are numbered and meant to be run **in order**. ▶️
 | ☁️ | **Platform** | Databricks |
 | ⚡ | **Processing** | PySpark |
 | 🔺 | **Storage** | Delta Lake |
-| 🌐 | **Data source** | [Jolpica F1 API](https://github.com/jolpica/jolpica-f1) (open-source successor to the Ergast API) |
+| 🌐 | **Data sources** | [Jolpica F1 API](https://github.com/jolpica/jolpica-f1) and [OpenF1](https://openf1.org/docs/) |
 | 🐍 | **Language** | Python |
 | 📓 | **Interface** | Databricks notebooks |
+| 🧮 | **Analytics** | Spark SQL and PySpark window functions |
 
 ## 🚀 Getting Started
 
 ### ✅ Prerequisites
 
 - ☁️ A Databricks workspace (the [Free Edition](https://www.databricks.com/learn/free-edition) works)
-- 🖥️ A running cluster or serverless compute
-- 🌍 Outbound internet access from the workspace to reach the Jolpica API (no API key required)
+- 🖥️ Serverless compute or a running Spark cluster
+- 🌍 Outbound internet access from the workspace to reach Jolpica and OpenF1 (no API key required for the historical endpoints used here)
 
 ### 📦 Setup
 
@@ -78,25 +83,52 @@ Notebooks are numbered and meant to be run **in order**. ▶️
    https://github.com/AdhishDatir/f1-race-strategy-lakehouse.git
 ```
 2. 🔌 Attach the notebooks to your compute.
-3. 🏠 Run `01_lakehouse_setup.ipynb` to create the schemas.
+3. 🏠 Run `01_lakehouse_setup.ipynb` to create `f1_bronze`, `f1_silver`, and `f1_gold` schemas.
 
 ### ▶️ Run
 
 Run the notebooks in order:
 
-1. 🏠 `01_lakehouse_setup.ipynb` to create the lakehouse structure
-2. 🥉 `02_bronze_api_ingestion.ipynb` and `04_bronze_lap_ingestion.ipynb` to load raw data
-3. 🥈 `03_silver_race_results.ipynb` and `05_silver_lap_times.ipynb` to build the Silver tables
+1. 🔥 `00_pyspark_basics.ipynb` for the learning exercises
+2. 🏠 `01_lakehouse_setup.ipynb` to create the lakehouse structure
+3. 🥉 `02_bronze_api_ingestion.ipynb` and `04_bronze_lap_ingestion.ipynb` to load raw results and laps
+4. 🥈 `03_silver_race_results.ipynb` and `05_silver_lap_times.ipynb` to build clean Silver tables
+5. 🥉 `06_bronze_pit_stop_ingestion.ipynb` and 🥈 `07_silver_pit_stops.ipynb` to add pit-stop data
+6. 🥇 `08_gold_stints.ipynb` to infer stint boundaries and calculate pace metrics
+7. 🛞 `09_openf1_tyre_stints.ipynb` to validate the matching race session and enrich compounds
 
 > 💡 `00_pyspark_basics.ipynb` is optional background reading.
 
-> ⚠️ **API etiquette:** Jolpica is a free community-run service with rate limits. Keep ingestion polite: add small delays between requests and avoid re-downloading data you already have.
+> ⚠️ **API etiquette:** Jolpica and OpenF1 are community-run services with usage limits. Keep ingestion polite, use the correct race/session keys, and avoid re-downloading data unnecessarily.
+
+## ✅ Current Outputs
+
+```text
+f1_bronze.api_responses
+  ├── race_results
+  ├── lap_times
+  ├── pit_stops
+  └── OpenF1 stint payloads
+
+f1_silver
+  ├── race_results       one row per driver per race
+  ├── lap_times          one row per driver per lap
+  └── pit_stops          one row per driver per stop
+
+f1_gold.driver_stint_metrics
+  └── stint boundaries, pace metrics, and compound enrichment in progress
+```
 
 ## 🗺️ Roadmap
 
-- [ ] 🥇 Gold layer: stint analysis, pace degradation, pit stop windows
-- [ ] 🛑 Pit stop ingestion (Jolpica `pitstops` endpoint)
-- [ ] ✅ Data quality checks
+- [x] 🥉 Bronze ingestion for race results, lap times, and pit stops
+- [x] 🥈 Silver race-result, lap-time, and pit-stop tables
+- [x] ✅ Data-quality checks for duplicates, missing values, invalid laps, and durations
+- [x] 🧩 Window-function stint boundary identification
+- [x] 🛞 OpenF1 session matching and tyre-compound enrichment
+- [ ] 📉 Tyre degradation and representative-lap metrics
+- [ ] 🏎️ Undercut/overcut outcome analysis
+- [ ] 🌦️ OpenF1 weather and safety-car/race-control enrichment
 - [ ] ⏰ Orchestration with Databricks Workflows / Jobs
 - [ ] 📊 Dashboards (Databricks SQL / AI/BI) for race strategy
 
@@ -104,7 +136,7 @@ Run the notebooks in order:
 
 Issues and pull requests are welcome! 🙌
 
-1. 🍴 Fork the repo
+1. 🍴 Fork this repo
 2. 🌿 Create a feature branch
 3. 💾 Commit your changes
 4. 📬 Open a pull request
@@ -112,8 +144,8 @@ Issues and pull requests are welcome! 🙌
 ## 🙏 Acknowledgements
 
 - 🏁 [Jolpica F1](https://github.com/jolpica/jolpica-f1) for the open F1 data API
+- 🛞 [OpenF1](https://openf1.org/docs/) for stint, compound, weather, and race-control data
 - 🕰️ The Ergast project, which Jolpica continues
-
 
 ## 👤 Author
 
